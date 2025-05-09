@@ -1,5 +1,6 @@
 package com.spark;
 
+import org.apache.spark.SparkEnv;
 import org.apache.spark.api.java.function.MapPartitionsFunction;
 import org.apache.spark.api.java.function.ReduceFunction;
 import org.apache.spark.broadcast.Broadcast;
@@ -9,12 +10,14 @@ import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.storage.StorageLevel;
+import org.deeplearning4j.datasets.iterator.IteratorDataSetIterator;
 import org.deeplearning4j.nn.conf.MultiLayerConfiguration;
 import org.deeplearning4j.nn.conf.NeuralNetConfiguration;
 import org.deeplearning4j.nn.conf.layers.DenseLayer;
 import org.deeplearning4j.nn.conf.layers.OutputLayer;
 import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
 import org.deeplearning4j.nn.weights.WeightInit;
+import org.nd4j.evaluation.regression.RegressionEvaluation;
 import org.nd4j.linalg.activations.Activation;
 import org.nd4j.linalg.api.ndarray.INDArray;
 import org.nd4j.linalg.dataset.DataSet;
@@ -32,8 +35,6 @@ public class Main {
 
     private static double FITTED_LAMBDA_INCOME = 0.3026418664067109;
     private static double FITTED_LAMBDA_WEALTH =  0.1336735055366279;
-    private static double[] SCALER_MEANS = new double[]{55.2534, 0.492, 2.5106, 0.41912250425, 7.664003606794818, 5.650795740523163, 0.3836, 0.5132, 1.7884450179129336};
-    private static double[] SCALER_SCALES = new double[]{11.970496582849016, 0.49993599590347565, 0.7617661320904205, 0.15136821202756753, 2.4818937424620633, 1.5813522545815777, 0.4862623160393987, 0.49982572962983807, 0.8569630982206199};
 
     private static int numIterations = 10;
     private static int numEpochs = 10;
@@ -147,12 +148,12 @@ public class Main {
                     List<Row> out = new ArrayList<>(n);
                     for (int i = 0; i < n; i++) {
                         float[] rowVec = scaled.getRow(i).toFloatVector();
-                        Float[] boxed  = new Float[rowVec.length];
-                        for (int j = 0; j < rowVec.length; j++) boxed[j] = rowVec[j];
+//                        Float[] boxed  = new Float[rowVec.length];
+//                        for (int j = 0; j < rowVec.length; j++) boxed[j] = rowVec[j];
 
                         float lbl = rows.get(i).getFloat(5);   // RiskPropensity column
 
-                        out.add(RowFactory.create(Arrays.asList(boxed), lbl));
+                        out.add(RowFactory.create(rowVec, lbl));
                     }
                     return out.iterator();
 
@@ -166,6 +167,7 @@ public class Main {
                     .sparkContext()
                     .broadcast(globalModel, ClassTag$.MODULE$.apply(MultiLayerNetwork.class));
 
+            int finalI = i;
             Dataset<Map<String, INDArray>> localWeights = clients
                     .mapPartitions((MapPartitionsFunction<Row, Map<String,INDArray>>) iter -> {
 
@@ -201,7 +203,15 @@ public class Main {
 
                         MultiLayerNetwork local = bModel.value().clone();
 
-                        local.fit(d.iterateWithMiniBatches(), numEpochs);  // local training
+                        IteratorDataSetIterator it = new IteratorDataSetIterator(d.iterator(), 64);
+                        for (int epoch = 0; epoch < numEpochs; epoch++) {
+                            local.fit(it);  // local training
+                        }
+
+                        RegressionEvaluation eval = local.evaluateRegression(it);
+
+                        System.out.println("Executor " + SparkEnv.get().executorId() + ": " + eval.stats());
+
                         Map<String,INDArray> w = local.paramTable();
 
                         return Collections.singletonList(w).iterator();
@@ -231,7 +241,5 @@ public class Main {
                 System.out.println("Iteration " + i + " completed.");
 
         }
-
     }
-
 }

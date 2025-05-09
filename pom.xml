@@ -25,17 +25,13 @@
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-core_2.12</artifactId>
             <version>3.5.5</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-sql_2.12</artifactId>
             <version>3.5.5</version>
             <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.spark</groupId>
-            <artifactId>spark-sql-kafka-0-10_2.12</artifactId>
-            <version>3.5.5</version>
         </dependency>
 
         <!-- dl4j -->
@@ -44,6 +40,12 @@
             <artifactId>deeplearning4j-core</artifactId>
             <version>1.0.0-M2.1</version>
         </dependency>
+        <dependency>
+            <groupId>org.deeplearning4j</groupId>
+            <artifactId>deeplearning4j-ui</artifactId>
+            <version>1.0.0-M2.1</version>
+        </dependency>
+
 
         <!-- nd4j -->
         <dependency>
@@ -51,52 +53,46 @@
             <artifactId>nd4j-native-platform</artifactId>
             <version>1.0.0-M2.1</version>     <!-- same as DL4J -->
         </dependency>
-        <dependency>
-            <groupId>org.bytedeco</groupId>
-            <artifactId>openblas</artifactId>
-            <version>0.3.21-1.5.8</version>
-            <classifier>macosx-x86_64</classifier>
-        </dependency>
-        <dependency>
-            <groupId>org.bytedeco</groupId>
-            <artifactId>javacpp</artifactId>
-            <version>1.5.11</version>
-            <classifier>macosx-x86_64</classifier>
-        </dependency>
+<!--        <dependency>-->
+<!--            <groupId>org.bytedeco</groupId>-->
+<!--            <artifactId>openblas</artifactId>-->
+<!--            <version>0.3.21-1.5.8</version>-->
+<!--            <classifier>macosx-arm64</classifier>-->
+<!--        </dependency>-->
+<!--        <dependency>-->
+<!--            <groupId>org.bytedeco</groupId>-->
+<!--            <artifactId>javacpp</artifactId>-->
+<!--            <version>1.5.11</version>-->
+<!--            <classifier>macosx-arm64</classifier>-->
+<!--        </dependency>-->
 
-        <!-- postgres -->
-        <dependency>
-            <groupId>org.postgresql</groupId>
-            <artifactId>postgresql</artifactId>
-            <version>42.7.5</version>
-        </dependency>
 
-        <!-- hdf5 -->
-        <!-- Native Intel dylib -->
-        <dependency>
-            <groupId>org.bytedeco</groupId>
-            <artifactId>hdf5</artifactId>
-            <version>1.14.3-1.5.10</version>
-        </dependency>
-        <dependency>
-            <groupId>org.bytedeco</groupId>
-            <artifactId>hdf5</artifactId>
-            <version>1.14.3-1.5.10</version>
-            <classifier>macosx-x86_64</classifier>
-        </dependency>
+<!--        &lt;!&ndash; hdf5 &ndash;&gt;-->
+<!--        &lt;!&ndash; Native Intel dylib &ndash;&gt;-->
+<!--        <dependency>-->
+<!--            <groupId>org.bytedeco</groupId>-->
+<!--            <artifactId>hdf5</artifactId>-->
+<!--            <version>1.14.3-1.5.10</version>-->
+<!--        </dependency>-->
+<!--        <dependency>-->
+<!--            <groupId>org.bytedeco</groupId>-->
+<!--            <artifactId>hdf5</artifactId>-->
+<!--            <version>1.14.3-1.5.10</version>-->
+<!--            <classifier>macosx-x86_64</classifier>-->
+<!--        </dependency>-->
     </dependencies>
 
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>org.bytedeco</groupId>
-                <artifactId>javacpp</artifactId>
-                <version>1.5.10</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
+<!--    <dependencyManagement>-->
+<!--        <dependencies>-->
+<!--            <dependency>-->
+<!--                <groupId>org.bytedeco</groupId>-->
+<!--                <artifactId>javacpp</artifactId>-->
+<!--                <version>1.5.10</version>-->
+<!--                <type>pom</type>-->
+<!--                <scope>import</scope>-->
+<!--            </dependency>-->
+<!--        </dependencies>-->
+<!--    </dependencyManagement>-->
 
     <build>
         <plugins>
