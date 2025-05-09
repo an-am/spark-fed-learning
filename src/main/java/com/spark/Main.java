@@ -1,6 +1,5 @@
 package com.spark;
 
-import org.apache.spark.SparkEnv;
 import org.apache.spark.api.java.function.MapPartitionsFunction;
 import org.apache.spark.api.java.function.ReduceFunction;
 import org.apache.spark.broadcast.Broadcast;
@@ -26,21 +25,17 @@ import org.nd4j.linalg.learning.config.Adam;
 import org.nd4j.linalg.lossfunctions.LossFunctions;
 import scala.reflect.ClassTag$;
 
-import java.io.IOException;
 import java.util.*;
 
 public class Main {
 
-    private static String CSV_PATH = "Needs.csv";
+    private static final double FITTED_LAMBDA_INCOME = 0.3026418664067109;
+    private static final double FITTED_LAMBDA_WEALTH =  0.1336735055366279;
 
-    private static double FITTED_LAMBDA_INCOME = 0.3026418664067109;
-    private static double FITTED_LAMBDA_WEALTH =  0.1336735055366279;
+    private static final int numIterations = 10;
+    private static final int numEpochs = 10;
 
-    private static int numIterations = 10;
-    private static int numEpochs = 10;
-
-    private static MultiLayerNetwork globalModel;
-    private static MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
+    private static final MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
             .seed(12345) //include a random seed for reproducibility
             .activation(Activation.RELU)
             .weightInit(WeightInit.ZERO)
@@ -87,7 +82,7 @@ public class Main {
     });
 
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) {
 
         SparkSession spark = SparkSession
                 .builder()
@@ -99,9 +94,10 @@ public class Main {
 
         spark.sparkContext().setLogLevel("ERROR");
 
-        globalModel = new MultiLayerNetwork(conf);
+        MultiLayerNetwork globalModel = new MultiLayerNetwork(conf);
         globalModel.init();
 
+        String CSV_PATH = "Needs.csv";
         Dataset<Row> fullDataset = spark
                 .read()
                 .option("header", "true")
@@ -111,8 +107,9 @@ public class Main {
         Dataset<Row> clients = fullDataset
                 .repartition(10)
                 .mapPartitions((MapPartitionsFunction<Row, Row>) iter -> {
-                    List<Row> rows = new ArrayList<>();
+                    // Data prep
 
+                    List<Row> rows = new ArrayList<>();
                     iter.forEachRemaining(rows::add);
 
                     int num_features = 9;
@@ -148,8 +145,6 @@ public class Main {
                     List<Row> out = new ArrayList<>(n);
                     for (int i = 0; i < n; i++) {
                         float[] rowVec = scaled.getRow(i).toFloatVector();
-//                        Float[] boxed  = new Float[rowVec.length];
-//                        for (int j = 0; j < rowVec.length; j++) boxed[j] = rowVec[j];
 
                         float lbl = rows.get(i).getFloat(5);   // RiskPropensity column
 
@@ -160,32 +155,30 @@ public class Main {
                 }, Encoders.row(featureSchema) )
                 .persist(StorageLevel.MEMORY_AND_DISK());
 
-
+        // FedAvg algorithm
         for (int i = 0; i < numIterations; i++) {
 
-            Broadcast<MultiLayerNetwork> bModel = spark
+            // Broadcast the global model's weights
+            Broadcast<INDArray> globalWeights = spark
                     .sparkContext()
-                    .broadcast(globalModel, ClassTag$.MODULE$.apply(MultiLayerNetwork.class));
+                    .broadcast(globalModel.params(), ClassTag$.MODULE$.apply(INDArray.class));
 
-            int finalI = i;
-            Dataset<Map<String, INDArray>> localWeights = clients
-                    .mapPartitions((MapPartitionsFunction<Row, Map<String,INDArray>>) iter -> {
+            // Local train
+            Dataset<INDArray> localWeights = clients
+                    .mapPartitions((MapPartitionsFunction<Row, INDArray>) iter -> {
 
-                        List<float[]> featList = new ArrayList<>();
-                        List<Float>   labList  = new ArrayList<>();
+                        List<float[]> featList = new ArrayList<>(); // Features
+                        List<Float>   labList  = new ArrayList<>(); // Labels
 
                         while (iter.hasNext()) {
                             Row r = iter.next();
 
-                            List<Float> feats = r.getList(0);   // first column = features array
+                            List<Float> feats = r.getList(0);   // First column = features array
                             float[] f = new float[feats.size()];
-
-                            for (int k = 0; k < f.length; k++)
-                                f[k] = feats.get(k);
-
+                            for (int k = 0; k < f.length; k++) f[k] = feats.get(k);
                             featList.add(f);
 
-                            labList.add(r.getFloat(1));        // second column = label
+                            labList.add(r.getFloat(1)); // Second column = label
                         }
 
                         int rows = featList.size();
@@ -201,44 +194,45 @@ public class Main {
 
                         DataSet d = new DataSet(featureMtx, labelVec);
 
-                        MultiLayerNetwork local = bModel.value().clone();
+                        INDArray w = globalWeights.value();
+                        MultiLayerNetwork local = new MultiLayerNetwork(conf);
+                        local.init(w, false);
 
-                        IteratorDataSetIterator it = new IteratorDataSetIterator(d.iterator(), 64);
+
                         for (int epoch = 0; epoch < numEpochs; epoch++) {
+                            IteratorDataSetIterator it = new IteratorDataSetIterator(d.iterator(), 64);
                             local.fit(it);  // local training
                         }
 
+                        IteratorDataSetIterator it = new IteratorDataSetIterator(d.iterator(), 64);
                         RegressionEvaluation eval = local.evaluateRegression(it);
 
-                        System.out.println("Executor " + SparkEnv.get().executorId() + ": " + eval.stats());
+                        System.out.println(eval.stats());
 
-                        Map<String,INDArray> w = local.paramTable();
+                        w = local.params();
 
                         return Collections.singletonList(w).iterator();
-                    }, Encoders.javaSerialization((Class<Map<String, INDArray>>) (Class<?>) Map.class));
+                    }, Encoders.kryo(INDArray.class));
 
 
                 // ---  Driver‑side FedAvg  ---------------------------------
                 // 1. Sum all weight maps
-                Map<String, INDArray> sum = localWeights.reduce(
-                        (ReduceFunction<Map<String, INDArray>>) (a, b) -> {
-                            b.forEach((k, v) -> a.get(k).addi(v));  // in‑place add
-                            return a;
+                INDArray sum = localWeights.reduce(
+                        (ReduceFunction<INDArray>) ( a,  b) -> {
+                            b.addi(a);
+                            return b;
                         });
 
                 // 2. Count how many local models contributed
                 long numModels = localWeights.count();
 
                 // 3. Divide by N  (sum = Σ w_i  →  mean = Σ w_i / N)
-                sum.forEach((k, v) -> v.divi(numModels));
+                sum.divi(numModels);
 
                 // 4. Update the global model with the averaged parameters
-                globalModel.setParamTable(sum);
-                // -----------------------------------------------------------
+                globalModel.setParams(sum);
 
-                bModel.destroy();
-
-                System.out.println("Iteration " + i + " completed.");
+            System.out.println("Iteration " + i + " completed.");
 
         }
     }
